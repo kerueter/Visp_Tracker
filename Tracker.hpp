@@ -30,7 +30,7 @@
 #include <visp3/core/vpPixelMeterConversion.h>
 #include <visp3/vision/vpPose.h>
 
-#include "Quarternion.hpp"
+#include "Vector.hpp"
 
 using namespace openni;
 
@@ -45,7 +45,7 @@ public:
     int initKeypointTrack(cv::Mat& frame);
     void keypointTrack(cv::Mat& frame);
     int trackPoints(cv::Mat& depth, cv::Mat& frame);
-    bool findCoplanarPoints(std::vector<Quarternion> features);
+    std::vector<Vector> findCoplanarPoints(std::vector<Vector> features);
 
 private:
     vpImage<unsigned char> I;

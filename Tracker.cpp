@@ -247,7 +247,11 @@ int Tracker::trackPoints(cv::Mat& depth, cv::Mat& frame) {
         // convert all feature points
         for(unsigned int i = 0; i < m_tracker.getFeatures().size(); i++)
         {
-
+            CoordinateConverter::convertDepthToWorld(tdepth, m_tracker.getFeatures()[i].x, m_tracker.getFeatures()[i].y, *pDepth, &worldX, &worldY, &worldZ);
+            // transform world parameters from millimeters to meters
+            worldX /= 1000;
+            worldY /= 1000;
+            worldZ /= 1000;
         }
         /*for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y) {
             for(int x = 0; x < tdepth.getVideoMode().getResolutionX(); ++x, ++pDepth) {
@@ -262,38 +266,42 @@ int Tracker::trackPoints(cv::Mat& depth, cv::Mat& frame) {
     }
 }
 
-bool Tracker::findCoplanarPoints(std::vector<Quarternion> features) {
+std::vector<Vector> Tracker::findCoplanarPoints(std::vector<Vector> features) {
+
+    std::vector<Vector> result;
 
     for(unsigned int a = 0; a < features.size(); a++) {
         for(unsigned int b = 0; b < features.size(); b++) {
             for(unsigned int c = 0; c < features.size(); c++) {
                 for(unsigned int d = 0; d < features.size(); d++) {
-                    Quarternion firstCalc(features[c].getX() - features[a].getX(),
-                                          features[c].getY() - features[a].getY(),
-                                          features[c].getZ() - features[a].getZ(),
-                                          features[c].getW() - features[a].getW());
-                    Quarternion secondCalc(features[b].getX() - features[a].getX(),
-                                          features[b].getY() - features[a].getY(),
-                                          features[b].getZ() - features[a].getZ(),
-                                          features[b].getW() - features[a].getW());
-                    Quarternion thirdCalc(features[d].getX() - features[c].getX(),
-                                          features[d].getY() - features[c].getY(),
-                                          features[d].getZ() - features[c].getZ(),
-                                          features[d].getW() - features[c].getW());
-                    Quarternion crossSecondThird((secondCalc.getY()*thirdCalc.getZ()) - (secondCalc.getZ()*thirdCalc.getY()),
-                                                 (secondCalc.getZ()*thirdCalc.getX()) - (secondCalc.getX()*thirdCalc.getZ()),
-                                                 (secondCalc.getX()*thirdCalc.getY()) - (secondCalc.getY()*thirdCalc.getX()),
-                                                 0);
-                    Quarternion result(firstCalc.getX() * crossSecondThird.getX(),
-                                       firstCalc.getY() * crossSecondThird.getY(),
-                                       firstCalc.getZ() * crossSecondThird.getZ(),
-                                       firstCalc.getW() * crossSecondThird.getW());
+                    // Richtungsvektoren bestimmen
+                    Vector vecAB(features[b].getX() - features[a].getX(),
+                                 features[b].getY() - features[a].getY(),
+                                 features[b].getZ() - features[a].getZ());
+                    Vector vecAC(features[c].getX() - features[a].getX(),
+                                 features[c].getY() - features[a].getY(),
+                                 features[c].getZ() - features[a].getZ());
 
-                    if((result.getX() == 0) && (result.getY() == 0) && (result.getZ() == 0) && (result.getW() == 0))
-                        return true;
+                    // Normalenvektor bestimmen
+                    Vector vecNorm((vecAB.getY()*vecAC.getZ()) - (vecAB.getZ()*vecAC.getY()),
+                                   (vecAB.getZ()*vecAC.getX()) - (vecAB.getX()*vecAC.getZ()),
+                                   (vecAB.getX()*vecAC.getY()) - (vecAB.getY()*vecAC.getX()));
+
+                    // Koordinatenform bestimmen
+                    float normA =  vecNorm.getX()*features[a].getX() +
+                                    vecNorm.getY()*features[a].getY() +
+                                    vecNorm.getZ()*features[a].getZ();
+
+                    float normD =  vecNorm.getX()*features[d].getX() +
+                                   vecNorm.getY()*features[d].getY() +
+                                   vecNorm.getZ()*features[d].getZ();
+
+                    // Punkt in Ebene - Überprüfung
+                    if(normA == normD)
+                        result.push_back(features[d]);
                 }
             }
         }
     }
-    return false;
+    return result;
 }
