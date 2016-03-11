@@ -12,9 +12,7 @@ Tracker::Tracker() {
 /**
  * Destructor for the tracker
  */
-Tracker::~Tracker() {
-
-}
+Tracker::~Tracker() {}
 
 /*int Tracker::lineTrack() {
     try {
@@ -131,20 +129,22 @@ Tracker::~Tracker() {
 /**
  * Tracks the keypoints from the given camera frame
  */
-int Tracker::keypointTrack(cv::Mat &frame) {
+int Tracker::initKeypointTrack(cv::Mat& frame) {
     try {
+        // nur zu Testzwecken
         if(!g.isOpened()) { // check if we succeeded
             std::cout << "Failed to open the camera" << std::endl;
             return -1;
         }
-        g >> frame; // get a new frame from camera
+        g >> frame;
         vpImageConvert::convert(frame, I);
         vpImageConvert::convert(I, frame);
 
-        vpDisplayOpenCV d(I, 0, 0, "Camera view");
+        m_window = vpDisplayOpenCV(I, 0, 0, "Camera view");
         vpDisplay::display(I);
         vpDisplay::flush(I);
 
+        // ab hier Initialisierung
         m_tracker.setMaxFeatures(100);
         m_tracker.setWindowSize(10);
         m_tracker.setQuality(0.6);
@@ -156,19 +156,6 @@ int Tracker::keypointTrack(cv::Mat &frame) {
 
         // Initialise the tracking
         m_tracker.initTracking(frame);
-        std::cout << "Tracker initialized with " << m_tracker.getNbFeatures() << " features" << std::endl;
-
-        while(1) {
-            g >> frame;
-            vpDisplay::display(I);
-            vpImageConvert::convert(frame, I);
-            vpImageConvert::convert(I, frame);
-            m_tracker.track(frame);
-            m_tracker.display(I, vpColor::red);
-            vpDisplay::flush(I);
-            m_tracker.initTracking(frame);
-            std::cout << m_tracker.getNbFeatures() << std::endl;
-        }
     }
     catch(vpException &e) {
         std::cout << "Catch an exception: " << e << std::endl;
@@ -177,8 +164,29 @@ int Tracker::keypointTrack(cv::Mat &frame) {
 
 }
 
-int Tracker::niTest(cv::Mat &depth, cv::Mat &frame) {
+void Tracker::keypointTrack(cv::Mat& frame) {
+    try {
+        // nur zu Testzwecken
+        g >> frame;
+        vpDisplay::display(I);
+        vpImageConvert::convert(frame, I);
+        vpImageConvert::convert(I, frame);
+
+        // ab hier Tracking
+        m_tracker.track(frame);
+        m_tracker.display(I, vpColor::red);
+        vpDisplay::flush(I);
+        m_tracker.initTracking(frame);
+    }
+    catch(vpException &e) {
+        std::cout << "Catch an exception: " << e << std::endl;
+    }
+}
+
+int Tracker::trackPoints(cv::Mat& depth, cv::Mat& frame) {
     Status rc = OpenNI::initialize();
+    initKeypointTrack(frame);
+
     if (rc != STATUS_OK)
     {
         printf("Initialize failed\n%s\n", OpenNI::getExtendedError());
@@ -234,7 +242,14 @@ int Tracker::niTest(cv::Mat &depth, cv::Mat &frame) {
 
         DepthPixel* pDepth = (DepthPixel*)tframe.getData();
 
-        for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y) {
+        keypointTrack(frame);
+
+        // convert all feature points
+        for(unsigned int i = 0; i < m_tracker.getFeatures().size(); i++)
+        {
+
+        }
+        /*for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y) {
             for(int x = 0; x < tdepth.getVideoMode().getResolutionX(); ++x, ++pDepth) {
                 CoordinateConverter::convertDepthToWorld(tdepth, x, y, *pDepth, &worldX, &worldY, &worldZ);
                 // transform world parameters from millimeters to meters
@@ -243,11 +258,42 @@ int Tracker::niTest(cv::Mat &depth, cv::Mat &frame) {
                 worldZ /= 1000;
                 std::cout << worldX << " " << worldY << " " << worldZ << std::endl;
             }
-        }
+        }*/
     }
 }
 
+bool Tracker::findCoplanarPoints(std::vector<Quarternion> features) {
 
-void Tracker::findCoplanarPoints() {
+    for(unsigned int a = 0; a < features.size(); a++) {
+        for(unsigned int b = 0; b < features.size(); b++) {
+            for(unsigned int c = 0; c < features.size(); c++) {
+                for(unsigned int d = 0; d < features.size(); d++) {
+                    Quarternion firstCalc(features[c].getX() - features[a].getX(),
+                                          features[c].getY() - features[a].getY(),
+                                          features[c].getZ() - features[a].getZ(),
+                                          features[c].getW() - features[a].getW());
+                    Quarternion secondCalc(features[b].getX() - features[a].getX(),
+                                          features[b].getY() - features[a].getY(),
+                                          features[b].getZ() - features[a].getZ(),
+                                          features[b].getW() - features[a].getW());
+                    Quarternion thirdCalc(features[d].getX() - features[c].getX(),
+                                          features[d].getY() - features[c].getY(),
+                                          features[d].getZ() - features[c].getZ(),
+                                          features[d].getW() - features[c].getW());
+                    Quarternion crossSecondThird((secondCalc.getY()*thirdCalc.getZ()) - (secondCalc.getZ()*thirdCalc.getY()),
+                                                 (secondCalc.getZ()*thirdCalc.getX()) - (secondCalc.getX()*thirdCalc.getZ()),
+                                                 (secondCalc.getX()*thirdCalc.getY()) - (secondCalc.getY()*thirdCalc.getX()),
+                                                 0);
+                    Quarternion result(firstCalc.getX() * crossSecondThird.getX(),
+                                       firstCalc.getY() * crossSecondThird.getY(),
+                                       firstCalc.getZ() * crossSecondThird.getZ(),
+                                       firstCalc.getW() * crossSecondThird.getW());
 
+                    if((result.getX() == 0) && (result.getY() == 0) && (result.getZ() == 0) && (result.getW() == 0))
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
 }

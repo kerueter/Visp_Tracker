@@ -7,9 +7,6 @@
  ***** University of Osnabrueck                             *****
  ***** Germany                                              *****
  ***** Func: implements a tracker based on Visp             *****
- ***** History: 2007-06-01 JW: improved performance of      *****
- ***** task access functions                                *****
- ***** ToDo: add memory pool for messages                   *****
  *****                                                      *****
  ******************************************************************/
 
@@ -33,6 +30,8 @@
 #include <visp3/core/vpPixelMeterConversion.h>
 #include <visp3/vision/vpPose.h>
 
+#include "Quarternion.hpp"
+
 using namespace openni;
 
 class Tracker {
@@ -43,14 +42,16 @@ public:
     //int lineTrack();
     //int ellipseTrack();
     //int blobTrack();
-    int keypointTrack(cv::Mat &frame);
-    int niTest(cv::Mat &depth, cv::Mat &frame);
-    void findCoplanarPoints();
+    int initKeypointTrack(cv::Mat& frame);
+    void keypointTrack(cv::Mat& frame);
+    int trackPoints(cv::Mat& depth, cv::Mat& frame);
+    bool findCoplanarPoints(std::vector<Quarternion> features);
 
 private:
     vpImage<unsigned char> I;
     vpKltOpencv m_tracker;
     cv::VideoCapture g;
+    vpDisplayOpenCV m_window;
 };
 
 
