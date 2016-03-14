@@ -17,15 +17,8 @@ Tracker::~Tracker() {}
 /**
  * Initializes the keypoint tracker
  */
-int Tracker::initKeypointTrack(cv::Mat& frame) {
+int Tracker::initKeypointTrack(cv::Mat frame) {
     try {
-        // nur zu Testzwecken
-        vpImageConvert::convert(frame, I);
-
-        vpDisplayOpenCV d(I, 0, 0, "Klt tracking");
-        vpDisplay::display(I);
-        vpDisplay::flush(I);
-
         // ab hier Initialisierung
         m_tracker.setMaxFeatures(100);
         m_tracker.setWindowSize(10);
@@ -49,13 +42,8 @@ int Tracker::initKeypointTrack(cv::Mat& frame) {
 /**
  * Tracks the keypoints from the given camera frame
  */
-void Tracker::keypointTrack(cv::Mat& frame) {
+void Tracker::keypointTrack(cv::Mat frame) {
     try {
-        // nur zu Testzwecken
-        vpImageConvert::convert(frame, I);
-        vpDisplay::display(I);
-
-        // ab hier Tracking
         m_tracker.track(frame);
         m_tracker.display(I, vpColor::red);
         vpDisplay::flush(I);
@@ -69,59 +57,72 @@ void Tracker::keypointTrack(cv::Mat& frame) {
 /**
  * Contains the tracking algorithm
  */
-int Tracker::trackPoints(cv::Mat& matDepth, cv::Mat& matColor) {
-    Status rc = openni::OpenNI::initialize();
-    g = cv::VideoCapture(CV_CAP_OPENNI_ASUS);
+int Tracker::trackPoints() {
+    Device device;
+    VideoStream depth, color;
 
-    if (rc != openni::STATUS_OK)
-    {
-        printf("Initialize failgit ed\n%s\n", openni::OpenNI::getExtendedError());
-        return 1;
-    }
+    OpenNI::initialize();
+    device.open(ANY_DEVICE);
 
-    if ( !g.isOpened() )
-    {
-        std::cout << "Error opening capture" << std::endl;
-        return -1;
-    }
+    depth.create(device, SENSOR_DEPTH);
+    color.create(device, SENSOR_COLOR);
 
-    float worldX;
-    float worldY;
-    float worldZ;
+    VideoMode vm = color.getVideoMode();
+    int cols, rows;
+    cols = vm.getResolutionX();
+    rows = vm.getResolutionY();
 
+    VideoFrameRef frame;
+    color.start();
+
+    std::vector<int> compression_params;
+    compression_params.push_back(CV_IMWRITE_PNG_COMPRESSION);
+    compression_params.push_back(9);
+
+    Status rc;
     while(1) {
-        if( !g.grab() )
+
+        int changedStreamDummy;
+        VideoStream* pStream = &color;
+        rc = OpenNI::waitForAnyStream(&pStream, 1, &changedStreamDummy, SAMPLE_READ_WAIT_TIMEOUT);
+
+        if (rc != STATUS_OK)
         {
-            std::cout << "Can not grab image" << std::endl;
+            printf("Wait failed! (timeout is %d ms)\n%s\n", SAMPLE_READ_WAIT_TIMEOUT, OpenNI::getExtendedError());
+            continue;
         }
-        else
+        rc = color.readFrame(&frame);
+        if (rc != STATUS_OK)
         {
-
-            g.retrieve(matDepth, CV_CAP_OPENNI_DEPTH_MAP);
-            g.retrieve(matColor, CV_CAP_OPENNI_BGR_IMAGE);
-
-            std::cout << "rows: " << matDepth.rows << " cols: " << matDepth.cols << std::endl;
-
-            if (!initTracking) {
-                initKeypointTrack(matDepth);
-                initTracking = true;
-            }
-            else {
-                keypointTrack(matDepth);
-            }
-
-            // convert all feature points
-            for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
-                std::cout << "track x: " << (int) m_tracker.getFeatures()[i].x << " track y: " <<
-                (int) m_tracker.getFeatures()[i].y << std::endl;
-                //openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthPixels, &worldX, &worldY, &worldZ);
-                // transform world parameters from millimeters to meters
-                //worldX /= 1000;
-                //worldY /= 1000;
-                //worldZ /= 1000;
-            }
+            printf("Read failed!\n%s\n", OpenNI::getExtendedError());
+            continue;
         }
-        /*for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y)
+
+        colorData = (RGB888Pixel *) frame.getData();
+        cv::Mat srcColor(rows, cols, CV_8UC3, colorData);
+        cv::Mat matColor;
+
+        cv::cvtColor(srcColor, matColor, CV_RGB2GRAY);
+
+        if (!initTracking) {
+            initKeypointTrack(matColor);
+            initTracking = true;
+        }
+        else {
+            keypointTrack(matColor);
+        }
+
+        // convert all feature points
+        /*for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
+            std::cout << "track x: " << (int) m_tracker.getFeatures()[i].x << " track y: " <<
+            (int) m_tracker.getFeatures()[i].y << std::endl;
+            //openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthPixels, &worldX, &worldY, &worldZ);
+            // transform world parameters from millimeters to meters
+            //worldX /= 1000;
+            //worldY /= 1000;
+            //worldZ /= 1000;
+        }
+        for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y)
         {
             for(int x = 0; x < tdepth.getVideoMode().getResolutionX(); ++x, ++pDepth) {
                 CoordinateConverter::convertDepthToWorld(tdepth, x, y, *pDepth, &worldX, &worldY, &worldZ);
