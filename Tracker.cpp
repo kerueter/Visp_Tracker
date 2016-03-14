@@ -6,7 +6,7 @@
  * Constructor for the tracker
  */
 Tracker::Tracker() {
-    g = cv::VideoCapture(0);
+    initTracking = false;
 }
 
 /**
@@ -14,133 +14,15 @@ Tracker::Tracker() {
  */
 Tracker::~Tracker() {}
 
-/*int Tracker::lineTrack() {
-    try {
-        if(!g.isOpened()) { // check if we succeeded
-            std::cout << "Failed to open the camera" << std::endl;
-            return -1;
-        }
-        g >> frame; // get a new frame from camera
-        vpImageConvert::convert(frame, I);
-
-        vpDisplayOpenCV d(I, 0, 0, "Camera view");
-        vpDisplay::display(I);
-        vpDisplay::flush(I);
-
-        vpMe me;
-        me.setRange(25);
-        me.setThreshold(15000);
-        me.setSampleStep(10);
-
-        vpMeLine line;
-        line.setMe(&me);
-        line.setDisplay(vpMeSite::RANGE_RESULT);
-        line.initTracking(I);
-
-        while(1) {
-            g >> frame;
-            vpImageConvert::convert(frame, I);
-            vpDisplay::display(I);
-            line.track(I);
-            line.display(I, vpColor::red);
-            vpDisplay::flush(I);
-        }
-    }
-    catch(vpException &e) {
-        std::cout << "Catch an exception: " << e << std::endl;
-    }
-}*/
-
-/*int Tracker::ellipseTrack() {
-    try {
-        if(!g.isOpened()) { // check if we succeeded
-            std::cout << "Failed to open the camera" << std::endl;
-            return -1;
-        }
-        g >> frame; // get a new frame from camera
-        vpImageConvert::convert(frame, I);
-
-        vpDisplayOpenCV d(I, 0, 0, "Camera view");
-        vpDisplay::display(I);
-        vpDisplay::flush(I);
-
-        vpMe me;
-        me.setRange(25);
-        me.setThreshold(15000);
-        me.setSampleStep(10);
-        vpMeEllipse ellipse;
-        ellipse.setMe(&me);
-        ellipse.setDisplay(vpMeSite::RANGE_RESULT);
-        ellipse.initTracking(I);
-        while(1) {
-            g >> frame;
-            vpImageConvert::convert(frame, I);
-            vpDisplay::display(I);
-            ellipse.track(I);
-            ellipse.display(I, vpColor::red);
-            vpDisplay::flush(I);
-        }
-    }
-    catch(vpException &e) {
-        std::cout << "Catch an exception: " << e << std::endl;
-    }
-}*/
-
-/*int Tracker::blobTrack() {
-
-    if(!g.isOpened()) { // check if we succeeded
-        std::cout << "Failed to open the camera" << std::endl;
-        return -1;
-    }
-    g >> frame; // get a new frame from camera
-    vpImageConvert::convert(frame, I);
-
-    vpDisplayOpenCV d(I, 0, 0, "Camera view");
-
-    vpDot2 blob;
-    blob.setGraphics(true);
-    blob.setGraphicsThickness(2);
-    vpImagePoint germ;
-    bool init_done = false;
-    std::cout << "Click!!!" << std::endl;
-    while(1) {
-        try {
-            g >> frame;
-            vpImageConvert::convert(frame, I);
-            vpDisplay::display(I);
-            if (!init_done) {
-                vpDisplay::displayText(I, vpImagePoint(10,10), "Click in the blob to initialize the tracker", vpColor::red);
-                if (vpDisplay::getClick(I, germ, false)) {
-                    blob.initTracking(I, germ);
-                    init_done = true;
-                }
-            }
-            else {
-                blob.track(I);
-            }
-            vpDisplay::flush(I);
-        }
-        catch(...) {
-            init_done = false;
-        }
-    }
-}*/
-
 /**
- * Tracks the keypoints from the given camera frame
+ * Initializes the keypoint tracker
  */
 int Tracker::initKeypointTrack(cv::Mat& frame) {
     try {
         // nur zu Testzwecken
-        if(!g.isOpened()) { // check if we succeeded
-            std::cout << "Failed to open the camera" << std::endl;
-            return -1;
-        }
-        g >> frame;
         vpImageConvert::convert(frame, I);
-        vpImageConvert::convert(I, frame);
 
-        m_window = vpDisplayOpenCV(I, 0, 0, "Camera view");
+        vpDisplayOpenCV d(I, 0, 0, "Klt tracking");
         vpDisplay::display(I);
         vpDisplay::flush(I);
 
@@ -164,13 +46,14 @@ int Tracker::initKeypointTrack(cv::Mat& frame) {
 
 }
 
+/**
+ * Tracks the keypoints from the given camera frame
+ */
 void Tracker::keypointTrack(cv::Mat& frame) {
     try {
         // nur zu Testzwecken
-        g >> frame;
-        vpDisplay::display(I);
         vpImageConvert::convert(frame, I);
-        vpImageConvert::convert(I, frame);
+        vpDisplay::display(I);
 
         // ab hier Tracking
         m_tracker.track(frame);
@@ -183,89 +66,80 @@ void Tracker::keypointTrack(cv::Mat& frame) {
     }
 }
 
-int Tracker::trackPoints(cv::Mat& depth, cv::Mat& frame) {
-    Status rc = OpenNI::initialize();
-    initKeypointTrack(frame);
+/**
+ * Contains the tracking algorithm
+ */
+int Tracker::trackPoints(cv::Mat& matDepth, cv::Mat& matColor) {
+    Status rc = openni::OpenNI::initialize();
+    g = cv::VideoCapture(CV_CAP_OPENNI_ASUS);
 
-    if (rc != STATUS_OK)
+    if (rc != openni::STATUS_OK)
     {
-        printf("Initialize failed\n%s\n", OpenNI::getExtendedError());
+        printf("Initialize failgit ed\n%s\n", openni::OpenNI::getExtendedError());
         return 1;
     }
 
-    Device device;
-    rc = device.open(ANY_DEVICE);
-    if (rc != STATUS_OK)
+    if ( !g.isOpened() )
     {
-        printf("Couldn't open device\n%s\n", OpenNI::getExtendedError());
-        return 2;
+        std::cout << "Error opening capture" << std::endl;
+        return -1;
     }
-
-    VideoStream tdepth;
-    if (device.getSensorInfo(SENSOR_DEPTH) != NULL)
-    {
-        rc = tdepth.create(device, SENSOR_DEPTH);
-        if (rc != STATUS_OK)
-        {
-            printf("Couldn't create depth stream\n%s\n", OpenNI::getExtendedError());
-            return 3;
-        }
-    }
-    rc = tdepth.start();
-    if (rc != STATUS_OK)
-    {
-        printf("Couldn't start the depth stream\n%s\n", OpenNI::getExtendedError());
-        return 4;
-    }
-
-    VideoFrameRef tframe;
 
     float worldX;
     float worldY;
     float worldZ;
 
     while(1) {
-        int changedStreamDummy;
-        VideoStream* pStream = &tdepth;
-        rc = OpenNI::waitForAnyStream(&pStream, 1, &changedStreamDummy, SAMPLE_READ_WAIT_TIMEOUT);
-        if (rc != STATUS_OK)
+        if( !g.grab() )
         {
-            printf("Wait failed! (timeout is %d ms)\n%s\n", SAMPLE_READ_WAIT_TIMEOUT, OpenNI::getExtendedError());
-            continue;
+            std::cout << "Can not grab image" << std::endl;
         }
-        rc = tdepth.readFrame(&tframe);
-        if (rc != STATUS_OK)
+        else
         {
-            printf("Read failed!\n%s\n", OpenNI::getExtendedError());
-            continue;
+
+            g.retrieve(matDepth, CV_CAP_OPENNI_DEPTH_MAP);
+            g.retrieve(matColor, CV_CAP_OPENNI_BGR_IMAGE);
+
+            std::cout << "rows: " << matDepth.rows << " cols: " << matDepth.cols << std::endl;
+
+            if (!initTracking) {
+                initKeypointTrack(matDepth);
+                initTracking = true;
+            }
+            else {
+                keypointTrack(matDepth);
+            }
+
+            // convert all feature points
+            for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
+                std::cout << "track x: " << (int) m_tracker.getFeatures()[i].x << " track y: " <<
+                (int) m_tracker.getFeatures()[i].y << std::endl;
+                //openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthPixels, &worldX, &worldY, &worldZ);
+                // transform world parameters from millimeters to meters
+                //worldX /= 1000;
+                //worldY /= 1000;
+                //worldZ /= 1000;
+            }
         }
-
-        DepthPixel* pDepth = (DepthPixel*)tframe.getData();
-
-        keypointTrack(frame);
-
-        // convert all feature points
-        for(unsigned int i = 0; i < m_tracker.getFeatures().size(); i++)
+        /*for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y)
         {
-            CoordinateConverter::convertDepthToWorld(tdepth, m_tracker.getFeatures()[i].x, m_tracker.getFeatures()[i].y, *pDepth, &worldX, &worldY, &worldZ);
-            // transform world parameters from millimeters to meters
-            worldX /= 1000;
-            worldY /= 1000;
-            worldZ /= 1000;
-        }
-        /*for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y) {
             for(int x = 0; x < tdepth.getVideoMode().getResolutionX(); ++x, ++pDepth) {
                 CoordinateConverter::convertDepthToWorld(tdepth, x, y, *pDepth, &worldX, &worldY, &worldZ);
                 // transform world parameters from millimeters to meters
                 worldX /= 1000;
                 worldY /= 1000;
                 worldZ /= 1000;
-                std::cout << worldX << " " << worldY << " " << worldZ << std::endl;
+
+                if(!(fabsf(worldX) == 0 || fabsf(worldY) == 0 || fabsf(worldZ) == 0))
+                    std::cout << worldX << " " << worldY << " " << worldZ << std::endl;
             }
         }*/
     }
 }
 
+/**
+ * Algorithm for finding coplanar points
+ */
 std::vector<Vector> Tracker::findCoplanarPoints(std::vector<Vector> features) {
 
     std::vector<Vector> result;

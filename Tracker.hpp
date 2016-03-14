@@ -32,8 +32,6 @@
 
 #include "Vector.hpp"
 
-using namespace openni;
-
 class Tracker {
 
 public:
@@ -44,14 +42,14 @@ public:
     //int blobTrack();
     int initKeypointTrack(cv::Mat& frame);
     void keypointTrack(cv::Mat& frame);
-    int trackPoints(cv::Mat& depth, cv::Mat& frame);
+    int trackPoints(cv::Mat& matDepth, cv::Mat& matColor);
     std::vector<Vector> findCoplanarPoints(std::vector<Vector> features);
 
 private:
     vpImage<unsigned char> I;
     vpKltOpencv m_tracker;
     cv::VideoCapture g;
-    vpDisplayOpenCV m_window;
+    bool initTracking;
 };
 
 
