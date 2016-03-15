@@ -72,36 +72,48 @@ int Tracker::trackPoints() {
     cols = vm.getResolutionX();
     rows = vm.getResolutionY();
 
-    VideoFrameRef frame;
-    color.start();
+    VideoFrameRef refColor;
+    VideoFrameRef refDepth;
 
-    std::vector<int> compression_params;
-    compression_params.push_back(CV_IMWRITE_PNG_COMPRESSION);
-    compression_params.push_back(9);
+    color.start();
+    depth.start();
 
     Status rc;
     while(1) {
 
         int changedStreamDummy;
-        VideoStream* pStream = &color;
-        rc = OpenNI::waitForAnyStream(&pStream, 1, &changedStreamDummy, SAMPLE_READ_WAIT_TIMEOUT);
+        VideoStream* colorStream = &color;
+        VideoStream* depthStream = &depth;
+        rc = OpenNI::waitForAnyStream(&colorStream, 1, &changedStreamDummy, SAMPLE_READ_WAIT_TIMEOUT);
+        rc = OpenNI::waitForAnyStream(&depthStream, 1, &changedStreamDummy, SAMPLE_READ_WAIT_TIMEOUT);
 
         if (rc != STATUS_OK)
         {
             printf("Wait failed! (timeout is %d ms)\n%s\n", SAMPLE_READ_WAIT_TIMEOUT, OpenNI::getExtendedError());
             continue;
         }
-        rc = color.readFrame(&frame);
+        rc = color.readFrame(&refColor);
+        if (rc != STATUS_OK)
+        {
+            printf("Read failed!\n%s\n", OpenNI::getExtendedError());
+            continue;
+        }
+        rc = depth.readFrame(&refDepth);
         if (rc != STATUS_OK)
         {
             printf("Read failed!\n%s\n", OpenNI::getExtendedError());
             continue;
         }
 
-        colorData = (RGB888Pixel *) frame.getData();
+        RGB888Pixel* colorData;
+        DepthPixel* depthData;
+
+        colorData = (RGB888Pixel*)refColor.getData();
+        depthData = (DepthPixel*)refDepth.getData();
+        DepthPixel* depthDataBegin = depthData;
+
         cv::Mat srcColor(rows, cols, CV_8UC3, colorData);
         cv::Mat matColor;
-
         cv::cvtColor(srcColor, matColor, CV_RGB2GRAY);
 
         if (!initTracking) {
@@ -112,68 +124,81 @@ int Tracker::trackPoints() {
             keypointTrack(matColor);
         }
 
-        // convert all feature points
-        /*for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
-            std::cout << "track x: " << (int) m_tracker.getFeatures()[i].x << " track y: " <<
-            (int) m_tracker.getFeatures()[i].y << std::endl;
-            //openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthPixels, &worldX, &worldY, &worldZ);
-            // transform world parameters from millimeters to meters
-            //worldX /= 1000;
-            //worldY /= 1000;
-            //worldZ /= 1000;
-        }
-        for(int y = 0; y < tdepth.getVideoMode().getResolutionY(); ++y)
-        {
-            for(int x = 0; x < tdepth.getVideoMode().getResolutionX(); ++x, ++pDepth) {
-                CoordinateConverter::convertDepthToWorld(tdepth, x, y, *pDepth, &worldX, &worldY, &worldZ);
-                // transform world parameters from millimeters to meters
-                worldX /= 1000;
-                worldY /= 1000;
-                worldZ /= 1000;
+        std::vector<Vector*> features;
 
-                if(!(fabsf(worldX) == 0 || fabsf(worldY) == 0 || fabsf(worldZ) == 0))
-                    std::cout << worldX << " " << worldY << " " << worldZ << std::endl;
+        // convert all feature points
+        for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
+            for(int y = 0; y < (int)m_tracker.getFeatures()[i].y; ++y) {
+                for(int x = 0; x <(int)m_tracker.getFeatures()[i].x; ++x) {
+                    ++depthData;
+                }
             }
-        }*/
+            openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthData, &worldX, &worldY, &worldZ);
+            // transform world parameters from millimeters to meters
+            /*worldX /= 1000;
+            worldY /= 1000;
+            worldZ /= 1000;*/
+
+            if(!(fabsf(worldX) == 0 || fabsf(worldY) == 0 || fabsf(worldZ) == 0))
+                features.push_back(new Vector(worldX, worldY, worldZ));
+            depthData = depthDataBegin;
+        }
+
+        std::vector<Vector*> result = findCoplanarPoints(features);
+        std::cout << "Koplanere Ebenen: " << (result.size() / 4) << std::endl;
+        for(unsigned int i = 0; i < result.size(); i++) {
+            if((i % 4) == 0)
+                std::cout << "\n";
+            std::cout << result[i]->getX() << " " << result[i]->getY() << " " << result[i]->getZ() << std::endl;
+        }
     }
 }
 
 /**
  * Algorithm for finding coplanar points
  */
-std::vector<Vector> Tracker::findCoplanarPoints(std::vector<Vector> features) {
+std::vector<Vector*> Tracker::findCoplanarPoints(std::vector<Vector*> features) {
 
-    std::vector<Vector> result;
+    std::vector<Vector*> result;
+    int count = 0;
 
     for(unsigned int a = 0; a < features.size(); a++) {
         for(unsigned int b = 0; b < features.size(); b++) {
             for(unsigned int c = 0; c < features.size(); c++) {
                 for(unsigned int d = 0; d < features.size(); d++) {
-                    // Richtungsvektoren bestimmen
-                    Vector vecAB(features[b].getX() - features[a].getX(),
-                                 features[b].getY() - features[a].getY(),
-                                 features[b].getZ() - features[a].getZ());
-                    Vector vecAC(features[c].getX() - features[a].getX(),
-                                 features[c].getY() - features[a].getY(),
-                                 features[c].getZ() - features[a].getZ());
+                    if(a != b != c != d) {
+                        // Richtungsvektoren bestimmen
+                        Vector vecAB(features[b]->getX() - features[a]->getX(),
+                                    features[b]->getY() - features[a]->getY(),
+                                    features[b]->getZ() - features[a]->getZ());
+                        Vector vecAC(features[c]->getX() - features[a]->getX(),
+                                    features[c]->getY() - features[a]->getY(),
+                                    features[c]->getZ() - features[a]->getZ());
+                        // Normalenvektor bestimmen
+                        Vector vecNorm((vecAB.getY()*vecAC.getZ()) - (vecAB.getZ()*vecAC.getY()),
+                                       (vecAB.getZ()*vecAC.getX()) - (vecAB.getX()*vecAC.getZ()),
+                                       (vecAB.getX()*vecAC.getY()) - (vecAB.getY()*vecAC.getX()));
 
-                    // Normalenvektor bestimmen
-                    Vector vecNorm((vecAB.getY()*vecAC.getZ()) - (vecAB.getZ()*vecAC.getY()),
-                                   (vecAB.getZ()*vecAC.getX()) - (vecAB.getX()*vecAC.getZ()),
-                                   (vecAB.getX()*vecAC.getY()) - (vecAB.getY()*vecAC.getX()));
+                        // Koordinatenform bestimmen
+                        float normA =   vecNorm.getX()*features[a]->getX() +
+                                        vecNorm.getY()*features[a]->getY() +
+                                        vecNorm.getZ()*features[a]->getZ();
 
-                    // Koordinatenform bestimmen
-                    float normA =  vecNorm.getX()*features[a].getX() +
-                                    vecNorm.getY()*features[a].getY() +
-                                    vecNorm.getZ()*features[a].getZ();
+                        float normD =   vecNorm.getX()*features[d]->getX() +
+                                        vecNorm.getY()*features[d]->getY() +
+                                        vecNorm.getZ()*features[d]->getZ();
 
-                    float normD =  vecNorm.getX()*features[d].getX() +
-                                   vecNorm.getY()*features[d].getY() +
-                                   vecNorm.getZ()*features[d].getZ();
-
-                    // Punkt in Ebene - Überprüfung
-                    if(normA == normD)
-                        result.push_back(features[d]);
+                        // Punkt in Ebene - Überprüfung
+                        if ((normA == normD) && (count == 0)) {
+                            result.push_back(features[a]);
+                            result.push_back(features[b]);
+                            result.push_back(features[c]);
+                            result.push_back(features[d]);
+                            ++count;
+                        }
+                        if(count == 7)
+                            count = 0;
+                    }
                 }
             }
         }

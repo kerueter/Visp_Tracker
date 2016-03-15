@@ -45,12 +45,11 @@ public:
     int initKeypointTrack(cv::Mat frame);
     void keypointTrack(cv::Mat frame);
     int trackPoints();
-    std::vector<Vector> findCoplanarPoints(std::vector<Vector> features);
+    std::vector<Vector*> findCoplanarPoints(std::vector<Vector*> features);
 
 private:
     vpImage<unsigned char> I;
     vpKltOpencv m_tracker;
-    RGB888Pixel* colorData;
     bool initTracking;
     float worldX;
     float worldY;
