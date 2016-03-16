@@ -30,6 +30,7 @@
 #include <visp3/core/vpPixelMeterConversion.h>
 #include <visp3/vision/vpPose.h>
 
+using namespace std;
 using namespace openni;
 
 class Tracker {
@@ -37,15 +38,12 @@ class Tracker {
 public:
     Tracker();
     ~Tracker();
-    //int lineTrack();
-    //int ellipseTrack();
-    //int blobTrack();
     int initKeypointTrack(cv::Mat frame);
     void keypointTrack(cv::Mat frame);
     int trackPoints();
-    std::vector<vpPoint> findCoplanarPoints(std::vector<vpPoint> features);
-    void computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo);
-    int keypointTrackTest();
+    map<vpPoint,int> ransacFinding(vector<vpPoint> features, vector<int> featureIds);
+    bool computePose(vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo);
+    //int keypointTrackTest();
 
 private:
     //vpImage<unsigned char> I;

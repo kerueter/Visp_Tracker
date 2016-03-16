@@ -1,3 +1,5 @@
+#include <set>
+#include <map>
 #include "Tracker.hpp"
 
 #define SAMPLE_READ_WAIT_TIMEOUT 2000 //2000ms
@@ -7,6 +9,7 @@
  */
 Tracker::Tracker() {
     initTracking = false;
+    initPose = true;
     //g = cv::VideoCapture(0);
 }
 
@@ -67,7 +70,7 @@ int Tracker::initKeypointTrack(cv::Mat frame) {
         // ab hier Initialisierung
         m_tracker.setMaxFeatures(100);
         m_tracker.setWindowSize(10);
-        m_tracker.setQuality(0.1);
+        m_tracker.setQuality(0.01);
         m_tracker.setMinDistance(15);
         m_tracker.setHarrisFreeParameter(0.04);
         m_tracker.setBlockSize(9);
@@ -76,9 +79,12 @@ int Tracker::initKeypointTrack(cv::Mat frame) {
 
         // Initialise the tracking
         m_tracker.initTracking(frame);
+        m_tracker.track(frame);
+        initTracking = true;
     }
     catch(vpException &e) {
-        std::cout << "Catch an exception: " << e << std::endl;
+        cout << "Catch an exception: " << e << endl;
+        initTracking = false;
     }
 
 
@@ -89,10 +95,11 @@ int Tracker::initKeypointTrack(cv::Mat frame) {
  */
 void Tracker::keypointTrack(cv::Mat frame) {
     try {
+        //m_tracker.initTracking(frame);
         m_tracker.track(frame);
     }
     catch(vpException &e) {
-        std::cout << "Catch an exception: " << e << std::endl;
+        cout << "Catch an exception: " << e << endl;
         initTracking = false;
     }
 }
@@ -155,56 +162,59 @@ int Tracker::trackPoints() {
 
         if (!initTracking) {
             initKeypointTrack(matColor);
-            initTracking = true;
         }
         else {
             keypointTrack(matColor);
         }
 
-        std::vector<vpPoint> features;
-        std::vector<vpPoint> point;
+        vector<vpPoint> features;
+        vector<int> featureIds;
         vpHomogeneousMatrix cMo;
 
         // convert all feature points
-        for (unsigned int i = 0; i < m_tracker.getFeatures().size(); i++) {
+        for(int i = 0; i < m_tracker.getFeatures().size(); i++) {
             for(int y = 0; y < (int)m_tracker.getFeatures()[i].y; ++y) {
                 for(int x = 0; x <(int)m_tracker.getFeatures()[i].x; ++x) {
                     ++depthData;
                 }
             }
-            openni::CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthData, &worldX, &worldY, &worldZ);
-
+            CoordinateConverter::convertDepthToWorld(depth, (int)m_tracker.getFeatures()[i].x, (int)m_tracker.getFeatures()[i].y, *depthData, &worldX, &worldY, &worldZ);
             if(!(fabsf(worldX) == 0 || fabsf(worldY) == 0 || fabsf(worldZ) == 0))
                 features.push_back(vpPoint(worldX, worldY, worldZ));
+                featureIds.push_back((int)m_tracker.getFeaturesId()[i]);
             depthData = depthDataBegin;
         }
 
-        std::vector<vpPoint> result;
+        if(features.size() > 3)
+            map<vpPoint,int> ransacRes = ransacFinding(features, featureIds);
+
+        /*std::vector<vpPoint> result;
 
         if(features.size() > 3) {
             result = findCoplanarPoints(features);
             if(result.size() > 0) {
-                computePose(result, initPose, cMo);
-                if (initPose)
-                    initPose = false;
-                vpTranslationVector trans = cMo.getTranslationVector();
-                for(unsigned int i = 0; i < trans.size(); i++) {
-                    std::cout << (trans[i] / 1000) << std::endl;
+                if(computePose(features, initPose, cMo)) {
+                    if (initPose)
+                        initPose = false;
+                    vpTranslationVector trans = cMo.getTranslationVector();
+                    for (unsigned int i = 0; i < trans.size(); i++) {
+                        std::cout << (trans[i] / 1000) << std::endl;
+                    }
+                    std::cout << "\n";
                 }
-                std::cout << "\n";
+                std::cout << "coplanar points, yay" << std::endl;
             }
-            else
+            else {
                 std::cout << "no coplanar points" << std::endl;
-        }
-        else
-            std::cout << "not enough features" << std::endl;
+            }
+        }*/
     }
 }
 
 /**
  * Pose estimation for given position
  */
-void Tracker::computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo) {
+bool Tracker::computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo) {
 
     vpPose pose;
 
@@ -227,56 +237,101 @@ void Tracker::computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousM
                 cMo = cMo_lag;
         }
         pose.computePose(vpPose::VIRTUAL_VS, cMo);
+        return true;
     }
     catch(vpException &e) {
-        std::cout << "Catch an exception: " << e << std::endl;
+        cout << "Catch an exception: " << e << endl;
+        return false;
     }
 }
 
 /**
- * Algorithm for finding coplanar points
+ * Finding best level for keypoint tracking
  */
-std::vector<vpPoint> Tracker::findCoplanarPoints(std::vector<vpPoint> features) {
+map<vpPoint,int> Tracker::ransacFinding(vector<vpPoint> features, vector<int> featureIds) {
 
-    std::vector<vpPoint> result;
+    map<vpPoint,int> bestlevel;
+    vpPoint point1;
+    vpPoint point2;
+    vpPoint point3;
+    int pointId1;
+    int pointId2;
+    int pointId3;
 
-    for(unsigned int a = 0; a < features.size(); a++) {
-        for(unsigned int b = 1; b < features.size(); b++) {
-            for(unsigned int c = 2; c < features.size(); c++) {
-                for(unsigned int d = 3; d < features.size(); d++) {
-                    if((a != b) && (a != c) && (a != d) && (b != c) && (b != d) && (c != d)) {
-                        // Richtungsvektoren bestimmen
-                        vpPoint vecAB(features[b].get_oX() - features[a].get_oX(),
-                                     features[b].get_oY() - features[a].get_oY(),
-                                     features[b].get_oZ() - features[a].get_oZ());
-                        vpPoint vecAC(features[c].get_oX() - features[a].get_oX(),
-                                     features[c].get_oY() - features[a].get_oY(),
-                                     features[c].get_oZ() - features[a].get_oZ());
-                        vpPoint vecAD(features[d].get_oX() - features[a].get_oX(),
-                                      features[d].get_oY() - features[a].get_oY(),
-                                      features[d].get_oZ() - features[a].get_oZ());
 
-                        // Normalenvektor bestimmen
-                        vpPoint vecNorm((vecAC.get_oY()*vecAD.get_oZ()) - (vecAC.get_Z()*vecAD.get_oY()),
-                                       (vecAC.get_oZ()*vecAD.get_oX()) - (vecAC.get_X()*vecAD.get_oZ()),
-                                       (vecAC.get_oX()*vecAD.get_oY()) - (vecAC.get_Y()*vecAD.get_oX()));
+    // Distance values
+    float bestdist = numeric_limits<float>::max();
+    float dist = 0;
 
-                        // Koordinatenform bestimmen
-                        double scalar = (vecAB.get_oX()*vecNorm.get_oX()) + (vecAB.get_oY()*vecNorm.get_oY()) + (vecAB.get_oZ()*vecNorm.get_oZ());
+    int iterations = 0;
+    int nonimproving_iterations = 0;
+    int max_iterations = 10;
 
-                        // Punkt in Ebene - Überprüfung
-                        if (scalar == 0) {
-                            result.push_back(features[a]);
-                            result.push_back(features[b]);
-                            result.push_back(features[c]);
-                            result.push_back(features[d]);
+    cout << "-----------------------------" << endl;
+    while((nonimproving_iterations < 5) && (iterations < max_iterations)) {
 
-                            return result;
-                        }
-                    }
-                }
-            }
+        int rand_num;
+        std::set<int> ids;
+
+        do {
+            rand_num = (int)(rand() % features.size());
+            ids.insert(rand_num);
         }
+        while(ids.size() < 3);
+
+        // copy set into vector
+        vector<unsigned long> sample_ids(ids.size());
+        std::copy(ids.begin(), ids.end(), sample_ids.begin());
+
+        // get the random points
+        point1 = vpPoint(features[sample_ids[0]].get_oX(), features[sample_ids[0]].get_oY(), features[sample_ids[0]].get_oZ());
+        point2 = vpPoint(features[sample_ids[1]].get_oX(), features[sample_ids[1]].get_oY(), features[sample_ids[1]].get_oZ());
+        point3 = vpPoint(features[sample_ids[2]].get_oX(), features[sample_ids[2]].get_oY(), features[sample_ids[2]].get_oZ());
+        pointId1 = featureIds[sample_ids[0]];
+        pointId2 = featureIds[sample_ids[1]];
+        pointId3 = featureIds[sample_ids[2]];
+
+
+        // Richtungsvektoren bestimmen
+        vpPoint vecAB(point2.get_oX() - point1.get_oX(),
+                      point2.get_oY() - point1.get_oY(),
+                      point2.get_oZ() - point1.get_oZ());
+        vpPoint vecAC(point3.get_oX() - point1.get_oX(),
+                      point3.get_oY() - point1.get_oY(),
+                      point3.get_oZ() - point1.get_oZ());
+
+        // Normalenvektor bestimmen
+        vpPoint vecNorm((vecAB.get_oY()*vecAC.get_oZ()) - (vecAB.get_Z()*vecAC.get_oY()),
+                        (vecAB.get_oZ()*vecAC.get_oX()) - (vecAB.get_X()*vecAC.get_oZ()),
+                        (vecAB.get_oX()*vecAC.get_oY()) - (vecAB.get_Y()*vecAC.get_oX()));
+
+        // Vektor normalisieren
+        double norm = sqrt((vecNorm.get_oX()*vecNorm.get_oX()) + (vecNorm.get_oY()*vecNorm.get_oY()) + (vecNorm.get_oZ()*vecNorm.get_oZ()));
+
+        for(vpPoint feature : features) {
+            double scalar = (vecNorm.get_oX()*feature.get_oX()) + (vecNorm.get_oY()*feature.get_oY()) + (vecNorm.get_oZ()*feature.get_oZ());
+            double a = (vecNorm.get_oX()*point1.get_oX()) + (vecNorm.get_oY()*point1.get_oY()) + (vecNorm.get_oZ()*point1.get_oZ());
+
+            dist += fabs(scalar - a);
+            if(norm != 0)
+                dist /= norm;
+        }
+
+        if(dist < bestdist) {
+            bestdist = dist;
+            nonimproving_iterations = 0;
+
+            bestlevel.clear();
+            bestlevel.insert(pair<vpPoint,int>(point1,pointId1));
+            bestlevel.insert(pair<vpPoint,int>(point2,pointId2));
+            bestlevel.insert(pair<vpPoint,int>(point3,pointId3));
+        }
+        else {
+            nonimproving_iterations++;
+        }
+        cout << bestdist << endl;
+        iterations++;
     }
-    return result;
+
+    return bestlevel;
 }
