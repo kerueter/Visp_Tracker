@@ -30,6 +30,8 @@
 #include <visp3/core/vpPixelMeterConversion.h>
 #include <visp3/vision/vpPose.h>
 
+#include "Keypoint.hpp"
+
 using namespace std;
 using namespace openni;
 
@@ -41,7 +43,8 @@ public:
     int initKeypointTrack(cv::Mat frame);
     void keypointTrack(cv::Mat frame);
     int trackPoints();
-    map<vpPoint,int> ransacFinding(vector<vpPoint> features, vector<int> featureIds);
+    vector<Keypoint> ransacFinding(vector<Keypoint> features);
+    vector<Keypoint> findPointsInLevel(vector<Keypoint> bestlevel, vector<Keypoint> features);
     bool computePose(vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo);
     //int keypointTrackTest();
 
