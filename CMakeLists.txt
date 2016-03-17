@@ -9,7 +9,7 @@ include_directories(${VISP_INCLUDE_DIRS} ${OPENNI2_INCLUDE_DIRS})
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-set(SOURCE_FILES main.cpp Tracker.cpp Vector.cpp Keypoint.cpp)
+set(SOURCE_FILES main.cpp Tracker.cpp Keypoint.cpp)
 add_executable(VISP_EXAMPLES ${SOURCE_FILES})
 
 target_link_libraries(VISP_EXAMPLES ${VISP_LIBRARIES} ${OPENNI2_LIBRARIES})
