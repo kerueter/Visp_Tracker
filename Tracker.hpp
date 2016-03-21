@@ -45,7 +45,8 @@ public:
     int trackPoints();
     vector<Keypoint> ransacFinding(vector<Keypoint> features);
     vector<Keypoint> findPointsInLevel(vector<Keypoint> bestlevel, vector<Keypoint> features);
-    bool computePose(vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo);
+    bool computePose(vector<Keypoint>& point, vpHomogeneousMatrix &cMo);
+    vector<unsigned long> drawSamples(unsigned long size, int n);
     //int keypointTrackTest();
 
 private:

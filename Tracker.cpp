@@ -68,7 +68,7 @@ Tracker::~Tracker() {}
 int Tracker::initKeypointTrack(cv::Mat frame) {
     try {
         // ab hier Initialisierung
-        m_tracker.setMaxFeatures(100);
+        m_tracker.setMaxFeatures(50);
         m_tracker.setWindowSize(10);
         m_tracker.setQuality(0.01);
         m_tracker.setMinDistance(15);
@@ -168,8 +168,6 @@ int Tracker::trackPoints() {
         }
 
         vector<Keypoint> features;
-        vector<int> featureIds;
-        vpHomogeneousMatrix cMo;
 
         // convert all feature points
         for(int i = 0; i < m_tracker.getFeatures().size(); i++) {
@@ -186,12 +184,29 @@ int Tracker::trackPoints() {
 
         vector<Keypoint> ransac_level;
         vector<Keypoint> points_in_level;
+        vpHomogeneousMatrix cMo;
 
-        if(features.size() > 3)
+        if(features.size() > 3) {
             ransac_level = ransacFinding(features);
+        }
 
         if(ransac_level.size() > 0) {
             points_in_level = findPointsInLevel(ransac_level, features);
+
+            if(points_in_level.size() > 3) {
+                vector<Keypoint> estimate_pose;
+                vector<unsigned long> sample_ids = drawSamples(points_in_level.size(), 4);
+
+                estimate_pose.push_back(points_in_level[sample_ids[0]]);
+                estimate_pose.push_back(points_in_level[sample_ids[1]]);
+                estimate_pose.push_back(points_in_level[sample_ids[2]]);
+                estimate_pose.push_back(points_in_level[sample_ids[3]]);
+
+                if (computePose(estimate_pose, cMo)) {
+                    vpTranslationVector trans = cMo.getTranslationVector();
+                    cout << trans[0] << endl;
+                }
+            }
         }
     }
 }
@@ -199,19 +214,18 @@ int Tracker::trackPoints() {
 /**
  * Pose estimation for given position
  */
-bool Tracker::computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousMatrix &cMo) {
+bool Tracker::computePose(vector<Keypoint>& point, vpHomogeneousMatrix &cMo) {
 
     vpPose pose;
 
     try {
         for (unsigned int i = 0; i < point.size(); i++) {
-            pose.addPoint(point[i]);
+            pose.addPoint(point[i].getPoint());
         }
 
-        if (init) {
+        if (initPose) {
             vpHomogeneousMatrix cMo_dem;
             vpHomogeneousMatrix cMo_lag;
-
             pose.computePose(vpPose::DEMENTHON, cMo_dem);
             pose.computePose(vpPose::LAGRANGE, cMo_lag);
             double residual_dem = pose.computeResidual(cMo_dem);
@@ -220,12 +234,16 @@ bool Tracker::computePose(std::vector<vpPoint> &point, bool init, vpHomogeneousM
                 cMo = cMo_dem;
             else
                 cMo = cMo_lag;
+            initPose = false;
         }
-        pose.computePose(vpPose::VIRTUAL_VS, cMo);
+        else {
+            pose.computePose(vpPose::VIRTUAL_VS, cMo);
+        }
         return true;
     }
     catch(vpException &e) {
         cout << "Catch an exception: " << e << endl;
+        initPose = true;
         return false;
     }
 }
@@ -250,18 +268,7 @@ vector<Keypoint> Tracker::ransacFinding(vector<Keypoint> features) {
 
     while((nonimproving_iterations < 5) && (iterations < max_iterations)) {
 
-        int rand_num;
-        std::set<int> ids;
-
-        do {
-            rand_num = (int)(rand() % features.size());
-            ids.insert(rand_num);
-        }
-        while(ids.size() < 3);
-
-        // copy set into vector
-        vector<unsigned long> sample_ids(ids.size());
-        std::copy(ids.begin(), ids.end(), sample_ids.begin());
+        vector<unsigned long> sample_ids = drawSamples(features.size(), 3);
 
         // get the random points
         point1 = vpPoint(features[sample_ids[0]].getPoint());
@@ -301,13 +308,13 @@ vector<Keypoint> Tracker::ransacFinding(vector<Keypoint> features) {
             bestlevel.push_back(Keypoint(features[sample_ids[0]].getID(), point1));
             bestlevel.push_back(Keypoint(features[sample_ids[1]].getID(), point2));
             bestlevel.push_back(Keypoint(features[sample_ids[2]].getID(), point3));
+
         }
         else {
             nonimproving_iterations++;
         }
         iterations++;
     }
-
     return bestlevel;
 }
 
@@ -340,20 +347,40 @@ vector<Keypoint> Tracker::findPointsInLevel(vector<Keypoint> bestlevel, vector<K
                     vecNorm.get_oZ()*point1.get_oZ();
 
     for(int i = 0; i < features.size(); i++) {
-        if((bestlevel[0].getID() != features[i].getID()) && (bestlevel[1].getID() != features[i].getID()) && (bestlevel[2].getID() != features[i].getID())) {
+        if((bestlevel[0].getID() != features[i].getID()) &&
+           (bestlevel[1].getID() != features[i].getID()) &&
+           (bestlevel[2].getID() != features[i].getID())) {
             double normD = vecNorm.get_oX() * features[i].getX() +
                            vecNorm.get_oY() * features[i].getY() +
                            vecNorm.get_oZ() * features[i].getZ();
 
+
+
             // if point is in level
-            if (normA == normD) {
+            if (normA - normD < 0.5) {
                 result.push_back(Keypoint(features[i].getID(), features[i].getPoint()));
-                cout << features[i].getX() << " " << features[i].getY() << " " << features[i].getZ() << " " << endl;
-            }
-            else {
-                cout << "point not in level" << endl;
             }
         }
     }
-    cout << "------------------------------" << endl;
+    return result;
+}
+
+/**
+ * Draws a set of random generated numbers
+ */
+vector<unsigned long> Tracker::drawSamples(unsigned long size, int n) {
+    set<int> estimate_set;
+    int rand_num;
+
+    do {
+        rand_num = (int)(rand() % size);
+        estimate_set.insert(rand_num);
+    }
+    while(estimate_set.size() < n);
+
+    // copy set into vector
+    vector<unsigned long> sample_ids(estimate_set.size());
+    std::copy(estimate_set.begin(), estimate_set.end(), sample_ids.begin());
+
+    return sample_ids;
 }
